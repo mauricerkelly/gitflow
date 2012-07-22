@@ -47,6 +47,7 @@ init() {
 usage() {
 	echo "usage: git flow hotfix [list] [-v]"
 	echo "       git flow hotfix start [-F] <version> [<base>]"
+    echo "       git flow hotfix review <version>"
 	echo "       git flow hotfix finish [-Fsumpk] <version>"
 	echo "       git flow hotfix publish <version>"
 	echo "       git flow hotfix track <version>"
@@ -156,6 +157,60 @@ require_no_existing_hotfix_branches() {
 		die "There is an existing hotfix branch ($first_branch). Finish that one first."
 }
 
+require_review_branch() {
+    local hotfix_branches=$(echo "$(git_local_branches)" | grep "^${1}")
+    [ -n "$hotfix_branches" ] || \
+        die "There is no hotfix review branch (${1}). Set up a code review before trying to finish the hotfix."
+}
+
+cmd_review() {
+    echo "This is the review command"
+    parse_args "$@"
+    require_version_arg
+
+    local hotfix_branches
+    hotfix_branches=$(echo "$(git_local_branches)" | grep "^$PREFIX")
+    if [ -z "$hotfix_branches" ]; then
+        warn "No hotfix branches exist."
+                warn ""
+                warn "You can start a new hotfix branch:"
+                warn ""
+                warn "    git flow hotfix start <version> [<base>]"
+                warn ""
+        exit 0
+    fi
+
+    # sanity checks
+    require_clean_working_tree
+    require_branch "$BRANCH"
+    require_tag_absent "$VERSION_PREFIX$VERSION"
+    # if flag fetch; then
+    #     git fetch -q "$ORIGIN" "$MASTER_BRANCH"
+    # fi
+    # if has "$ORIGIN/$MASTER_BRANCH" $(git_remote_branches); then
+    #     require_branches_equal "$MASTER_BRANCH" "$ORIGIN/$MASTER_BRANCH"
+    # fi
+
+    # create branch
+    REVIEW_BRANCH=reviews/${PREFIX}${USER}/$VERSION
+    git checkout -b "$REVIEW_BRANCH" "$BRANCH"
+    git push "$ORIGIN" "$REVIEW_BRANCH:refs/heads/$REVIEW_BRANCH"
+
+
+    echo
+    echo "Summary of actions:"
+    echo "- A review branch '$REVIEW_BRANCH' was created, based on the hotfix '$BRANCH'"
+    echo "- The review branch was pushed to the $ORIGIN server"
+    echo "- You are now on branch '$REVIEW_BRANCH'"
+    echo
+    echo "Follow-up actions:"
+    echo "- Ask your teammate for a review"
+    echo "- When reviewed, run:"
+    echo
+    echo "     git flow hotfix finish '$VERSION'"
+    echo
+}
+
 cmd_start() {
 	DEFINE_boolean fetch false "fetch from $ORIGIN before performing finish" F
 	parse_args "$@"
@@ -256,8 +311,11 @@ cmd_finish() {
 		FLAGS_sign=$FLAGS_TRUE
 	fi
 
+    REVIEW_BRANCH=reviews/${PREFIX}${USER}/$VERSION
+
 	# sanity checks
 	require_branch "$BRANCH"
+    require_review_branch "$REVIEW_BRANCH"
 	require_clean_working_tree
 	if flag fetch; then
 		git fetch -q "$ORIGIN" "$MASTER_BRANCH" || \
@@ -316,6 +374,10 @@ cmd_finish() {
 	# delete branch
 	if noflag keep; then
 		git branch -d "$BRANCH"
+        git checkout "$DEVELOP_BRANCH" || \
+          die "Could not check out $DEVELOP_BRANCH."
+        git branch -d "$REVIEW_BRANCH"
+        git push "$ORIGIN" ":$REVIEW_BRANCH"
 	fi
 
 	if flag push; then
